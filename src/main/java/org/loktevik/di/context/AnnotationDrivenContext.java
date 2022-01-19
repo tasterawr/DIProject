@@ -1,180 +1,184 @@
 package org.loktevik.di.context;
 
 import org.loktevik.di.annotations.*;
+import org.loktevik.di.context.handlers.BeanMetadataHandler;
+import org.loktevik.di.exceptions.BeanCreationException;
 import org.loktevik.di.exceptions.BeanNotFoundException;
 import org.loktevik.di.exceptions.ComponentScanException;
 
 import java.io.File;
-import java.lang.reflect.*;
+import java.lang.reflect.Constructor;
+import java.lang.reflect.Field;
+import java.lang.reflect.InvocationTargetException;
+import java.lang.reflect.Method;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Locale;
 import java.util.stream.Collectors;
 
-public class AnnotationDrivenContext implements DependencyInjectionContext {
+public class AnnotationDrivenContext extends BaseDependencyInjectionContext implements DependencyInjectionContext {
     private final List<Class<?>> classes;
     private final String basePackageName;
+    private final List<BeanMetadataHandler> handlers;
+    private ConfigurationClassDrivenContext configurationClassDrivenContext = null;
 
     {
         classes = new ArrayList<>();
         basePackageName = this.getClass().getName().split("\\.")[0];
+        handlers = new ArrayList<>();
     }
 
     public AnnotationDrivenContext(Path componentScanPath){
-        File root = componentScanPath.toFile();
-
-        if (root.listFiles() != null){
-            readClasses(root);
-        } else {
-            throw new ComponentScanException(String.format("Path %s is not a directory.", componentScanPath));
-        }
-
-        List<Class<?>> componentClasses = classes.stream()
-                .filter(clazz -> clazz.isAnnotationPresent(Component.class))
-                .collect(Collectors.toList());
+        scanComponents(componentScanPath);
+        getBeanMetadataHandlers();
+        List<Class<?>> componentClasses = getComponentClasses();
 
         for (Class<?> cl : componentClasses){
             BeanMetadata beanMetadata = new BeanMetadata();
-            if (!cl.getAnnotation(Component.class).value().equals("")){
-                beanMetadata.setName(cl.getAnnotation(Component.class).value());
-            } else{
-                String firstLetter = cl.getSimpleName().split("")[0].toLowerCase(Locale.ROOT);
-                beanMetadata.setName(firstLetter + cl.getSimpleName().substring(1));
-            }
             beanMetadata.setClazz(cl);
-            if (cl.isAnnotationPresent(Prototype.class)){
-                beanMetadata.setScope("prototype");
-            } else {
-                beanMetadata.setScope("singleton");
-            }
             beanMetadata.setContextType(ContextType.ANNOTATION_DRIVEN);
+            beanMetadata.setContext(this);
+            beanMetadata.setAnnotationDependencies(new ArrayList<>());
 
-            List<DependencyMetadata> dependencies = new ArrayList<>();
-            for (Field field : cl.getDeclaredFields()) {
-                if (field.isAnnotationPresent(AutoInject.class)){
-                    DependencyMetadata dm = new DependencyMetadata();
-                    dm.setName(field.getDeclaredAnnotation(AutoInject.class).value());
-                    dm.setClazz(field.getType());
-                    dm.setInjectType(InjectType.FIELD);
-                    dependencies.add(dm);
-                }
+            for (BeanMetadataHandler handler : handlers){
+                handler.handle(beanMetadata);
             }
-
-            for (Constructor<?> cons : cl.getDeclaredConstructors()){
-                if (cons.isAnnotationPresent(AutoInject.class)){
-                    for (Parameter param : cons.getParameters()){
-                        DependencyMetadata dm = new DependencyMetadata();
-                        if (param.isAnnotationPresent(ByName.class)){
-                            dm.setName(param.getDeclaredAnnotation(ByName.class).value());
-                        }
-                        dm.setClazz(param.getType());
-                        dm.setInjectType(InjectType.CONSTRUCTOR);
-                        dependencies.add(dm);
-                    }
-                }
-            }
-
-            for (Method m : cl.getDeclaredMethods()){
-                if (m.isAnnotationPresent(AutoInject.class) && m.getParameters().length == 1 && m.getName().indexOf("set") == 0){
-                    DependencyMetadata dm = new DependencyMetadata();
-                    dm.setName(m.getDeclaredAnnotation(AutoInject.class).value());
-                    dm.setClazz(m.getParameterTypes()[0]);
-                    dm.setInjectType(InjectType.SETTER);
-                    dependencies.add(dm);
-                }
-            }
-
-            beanMetadata.setAnnotationDependencies(dependencies);
             MainBeanContainer.addBeanMetadata(beanMetadata);
         }
 
-        List<BeanMetadata> metadataList = MainBeanContainer.getMetadataList().stream()
-                .filter(beanMetadata -> beanMetadata.getContextType().equals(ContextType.ANNOTATION_DRIVEN))
-                .collect(Collectors.toList());
-
-        for (BeanMetadata beanMetadata : metadataList){
-            createBeanFromMetadata(beanMetadata);
+        List<Class<?>> includedConfigurations = getIncludedConfigurations();
+        if (includedConfigurations.size() != 0){
+            configurationClassDrivenContext = new ConfigurationClassDrivenContext(includedConfigurations.toArray(new Class<?>[0]));
         }
     }
 
-    private void createBeanFromMetadata(BeanMetadata beanMetadata) {
+    private List<Class<?>> getIncludedConfigurations() {
+        return classes.stream()
+                .filter(clazz -> clazz.isAnnotationPresent(Configuration.class) && clazz.isAnnotationPresent(Included.class))
+                .collect(Collectors.toList());
+    }
+
+    private List<Class<?>> getComponentClasses() {
+        return classes.stream()
+                .filter(clazz -> clazz.isAnnotationPresent(Component.class))
+                .collect(Collectors.toList());
+    }
+
+    private void getBeanMetadataHandlers() {
+        classes.stream()
+                .filter(clazz -> clazz.isAnnotationPresent(MetadataHandler.class))
+                .forEach(clazz -> {
+                    try {
+                        BeanMetadataHandler handler = (BeanMetadataHandler)clazz.getDeclaredConstructor().newInstance();
+                        handlers.add(handler);
+                    } catch (InstantiationException | IllegalAccessException | InvocationTargetException | NoSuchMethodException e) {
+                        throw new ComponentScanException(String.format("Could not create instance of class %s.", clazz), e);
+                    }
+                });
+    }
+
+    @Override
+    protected void createBeanFromMetadata(BeanMetadata beanMetadata) {
         try {
             if (beanMetadata.getScope().equals("singleton")){
+                Object bean;
                 if (beanMetadata.getAnnotationDependencies().size() == 0){
-                    Object bean = beanMetadata.getClazz().getDeclaredConstructor().newInstance();
-                    MainBeanContainer.addSingletonBean(beanMetadata.getName(), bean);
+                    bean = beanMetadata.getClazz().getDeclaredConstructor().newInstance();
                 } else {
-                    List<Object> fieldDependencyBeans = new ArrayList<>();
-                    List<Object> consDependencyBeans = new ArrayList<>();
-                    List<Object> setterDependencyBeans = new ArrayList<>();
-                    for (DependencyMetadata dm : beanMetadata.getAnnotationDependencies()){
-                        Object dependencyBean = MainBeanContainer.getBean(dm.getClazz());
-                        if (dependencyBean == null){
-                            BeanMetadata dependencyMetadata = MainBeanContainer.getMetadataList().stream().filter(metadata -> metadata.getClazz().equals(dm.getClazz())).findFirst().orElse(null);
-                            if (dependencyMetadata != null) {
-                                createBeanFromMetadata(dependencyMetadata);
-                                dependencyBean = MainBeanContainer.getBean(dm.getClazz());
-                            }
-                        }
-
-                        if (dm.getInjectType().equals(InjectType.FIELD)){
-                            fieldDependencyBeans.add(dependencyBean);
-                        } else if (dm.getInjectType().equals(InjectType.CONSTRUCTOR)){
-                            consDependencyBeans.add(dependencyBean);
-                        } else {
-                            setterDependencyBeans.add(dependencyBean);
-                        }
-                    }
-
-                    Object bean = null;
-                    if (consDependencyBeans.size() != 0){
-                        List<? extends Class<?>> constructorParamTypes = beanMetadata.getAnnotationDependencies().stream()
-                                .filter(dm -> dm.getInjectType().equals(InjectType.CONSTRUCTOR))
-                                .map(DependencyMetadata::getClazz)
-                                .collect(Collectors.toList());
-
-                        Constructor<?> declaredConstructor = beanMetadata.getClazz().getDeclaredConstructor(constructorParamTypes.toArray(new Class[0]));
-                        bean = declaredConstructor.newInstance(consDependencyBeans.toArray());
-                    } else {
-                        bean = beanMetadata.getClazz().getDeclaredConstructor().newInstance();
-                    }
-
-                    if (fieldDependencyBeans.size() != 0){
-                        for (Field field : beanMetadata.getClazz().getDeclaredFields()){
-                            if (field.isAnnotationPresent(AutoInject.class)){
-                                field.setAccessible(true);
-                                Object dependency = fieldDependencyBeans.stream()
-                                        .filter(depBean -> depBean.getClass().equals(field.getType()))
-                                        .findFirst().orElse(null);
-                                field.set(bean, dependency);
-                            }
-                        }
-                    }
-
-                    if (setterDependencyBeans.size() != 0){
-                        for (Method m: beanMetadata.getClazz().getDeclaredMethods()){
-                            if (m.isAnnotationPresent(AutoInject.class)){
-                                m.setAccessible(true);
-                                Object dependency = setterDependencyBeans.stream()
-                                        .filter(depBean -> depBean.getClass().equals(m.getParameterTypes()[0]))
-                                        .findFirst().orElse(null);
-                                m.invoke(bean, dependency);
-                            }
-                        }
-                    }
-
-                    MainBeanContainer.addSingletonBean(beanMetadata.getName(), bean);
+                    bean = createBeanWithDependencies(beanMetadata);
                 }
+                MainBeanContainer.addSingletonBean(beanMetadata.getName(), bean);
             } else if (beanMetadata.getScope().equals("prototype")){
                 MainBeanContainer.addPrototypeBean(beanMetadata.getName(), beanMetadata);
             }
-        } catch (InvocationTargetException | IllegalAccessException | NoSuchMethodException | InstantiationException ignored) {
-
+        } catch (InvocationTargetException | IllegalAccessException | NoSuchMethodException | InstantiationException e) {
+            throw new BeanCreationException(String.format("Could not create bean for class %s", beanMetadata.getClazz()), e);
         }
     }
 
-    public void readClasses(File file){
+    private Object createBeanWithDependencies(BeanMetadata beanMetadata) throws NoSuchMethodException, InstantiationException, IllegalAccessException, InvocationTargetException {
+        List<Object> fieldDependencyBeans = new ArrayList<>();
+        List<Object> consDependencyBeans = new ArrayList<>();
+        List<Object> setterDependencyBeans = new ArrayList<>();
+        getAllDependencies(beanMetadata, fieldDependencyBeans, consDependencyBeans, setterDependencyBeans);
+
+        Object bean = injectConstructorDependencies(beanMetadata, consDependencyBeans);
+        injectFieldDependencies(beanMetadata, fieldDependencyBeans, bean);
+        injectSetterDependencies(beanMetadata, setterDependencyBeans, bean);
+        return bean;
+    }
+
+    private void getAllDependencies(BeanMetadata beanMetadata, List<Object> fieldDependencyBeans, List<Object> consDependencyBeans, List<Object> setterDependencyBeans) {
+        for (DependencyMetadata dm : beanMetadata.getAnnotationDependencies()){
+            Object dependencyBean = getDependencyBean(dm);
+
+            if (dependencyBean == null && !"".equals(dm.getName()) && dm.getName() != null){
+                throw new BeanNotFoundException(String.format("Bean with name \"%s\" not found", dm.getName()));
+            } else if (dependencyBean == null){
+                throw new BeanNotFoundException(String.format("Bean with class \"%s\" not found", dm.getClazz()));
+            }
+
+            if (dm.getInjectType().equals(InjectType.FIELD)){
+                fieldDependencyBeans.add(dependencyBean);
+            } else if (dm.getInjectType().equals(InjectType.CONSTRUCTOR)){
+                consDependencyBeans.add(dependencyBean);
+            } else {
+                setterDependencyBeans.add(dependencyBean);
+            }
+        }
+    }
+
+    private void injectSetterDependencies(BeanMetadata beanMetadata, List<Object> setterDependencyBeans, Object bean) throws IllegalAccessException, InvocationTargetException {
+        if (setterDependencyBeans.size() != 0){
+            for (Method m: beanMetadata.getClazz().getDeclaredMethods()){
+                if (m.isAnnotationPresent(AutoInject.class)){
+                    m.setAccessible(true);
+                    Object dependency = setterDependencyBeans.stream()
+                            .filter(depBean -> depBean.getClass().equals(m.getParameterTypes()[0]))
+                            .findFirst().orElse(null);
+                    m.invoke(bean, dependency);
+                }
+            }
+        }
+    }
+
+    private void injectFieldDependencies(BeanMetadata beanMetadata, List<Object> fieldDependencyBeans, Object bean) throws IllegalAccessException {
+        if (fieldDependencyBeans.size() != 0){
+            for (Field field : beanMetadata.getClazz().getDeclaredFields()){
+                if (field.isAnnotationPresent(AutoInject.class)){
+                    field.setAccessible(true);
+                    Object dependency = fieldDependencyBeans.stream()
+                            .filter(depBean -> depBean.getClass().equals(field.getType()))
+                            .findFirst().orElse(null);
+                    field.set(bean, dependency);
+                }
+            }
+        }
+    }
+
+    private Object injectConstructorDependencies(BeanMetadata beanMetadata, List<Object> consDependencyBeans) throws NoSuchMethodException, InstantiationException, IllegalAccessException, InvocationTargetException {
+        Object bean;
+        if (consDependencyBeans.size() != 0){
+            Constructor<?> declaredConstructor = beanMetadata.getClazz().getDeclaredConstructor(beanMetadata.getAnnotationDependencies().stream()
+                    .filter(dm -> dm.getInjectType().equals(InjectType.CONSTRUCTOR))
+                    .map(DependencyMetadata::getClazz).toArray(Class[]::new));
+
+            bean = declaredConstructor.newInstance(consDependencyBeans.toArray());
+        } else {
+            bean = beanMetadata.getClazz().getDeclaredConstructor().newInstance();
+        }
+        return bean;
+    }
+
+    private void scanComponents(Path componentScanPath){
+        if (componentScanPath.toFile().listFiles() == null) {
+            throw new ComponentScanException(String.format("Path %s is not a directory.", componentScanPath));
+        } else {
+            readClasses(componentScanPath.toFile());
+        }
+    }
+
+    private void readClasses(File file){
         File[] files = file.listFiles();
 
         if (files != null){
@@ -184,7 +188,7 @@ public class AnnotationDrivenContext implements DependencyInjectionContext {
                 } else {
                     String name = f.getPath();
                     if (!name.endsWith(".java")){
-                        continue;
+                        return;
                     } else {
                         int beginInd = name.indexOf(basePackageName);
                         int endInd = name.indexOf(".java");
@@ -192,7 +196,7 @@ public class AnnotationDrivenContext implements DependencyInjectionContext {
                         try {
                             classes.add(Class.forName(className));
                         } catch (ClassNotFoundException e) {
-                            throw new ComponentScanException(String.format("Error creating class %s.", className));
+                            throw new ComponentScanException(String.format("Error creating instance of class %s.", className));
                         }
                     }
                 }
@@ -201,22 +205,45 @@ public class AnnotationDrivenContext implements DependencyInjectionContext {
     }
 
     @Override
+    protected Object getPrototypeBean(BeanMetadata metadata){
+        try {
+            return createBeanWithDependencies(metadata);
+        } catch (NoSuchMethodException | InstantiationException | IllegalAccessException | InvocationTargetException ignored) {
+
+        }
+
+        return null;
+    }
+
+    @Override
     public Object getBean(String beanName) {
         Object bean = MainBeanContainer.getBean(beanName);
         if (bean == null){
             throw new BeanNotFoundException(String.format("Bean with name \"%s\" not found", beanName));
-        } else {
+        } else if (!(bean instanceof BeanMetadata)) {
             return bean;
+        } else{
+            if (((BeanMetadata) bean).getContextType().equals(ContextType.CONFIGURATION_DRIVEN)){
+                return configurationClassDrivenContext.getBean(beanName);
+            }
+
+            return getPrototypeBean((BeanMetadata)bean);
         }
     }
 
     @Override
-    public Object getBean(Class<?> clazz) {
+    public <T> T getBean(Class<T> clazz) {
         Object bean = MainBeanContainer.getBean(clazz);
         if (bean == null){
             throw new BeanNotFoundException(String.format("Bean with class \"%s\" not found", clazz));
-        } else {
-            return bean;
+        } else if (!(bean instanceof BeanMetadata)) {
+            return (T)bean;
+        } else{
+            if (((BeanMetadata) bean).getContextType().equals(ContextType.CONFIGURATION_DRIVEN)){
+                return configurationClassDrivenContext.getBean(clazz);
+            } else{
+                return (T)getPrototypeBean((BeanMetadata)bean);
+            }
         }
     }
 }

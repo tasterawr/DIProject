@@ -10,9 +10,10 @@ public class BeanMetadata {
     private String scope;
     private Object invokeOn;
     private Method method;
-    private List<Class<?>> dependencies = new ArrayList<>();
     private List<DependencyMetadata> annotationDependencies = new ArrayList<>();
     private ContextType contextType;
+    private BaseDependencyInjectionContext context;
+    private boolean beanCreated = false;
 
     public String getName() {
         return name;
@@ -36,14 +37,6 @@ public class BeanMetadata {
 
     public void setScope(String scope) {
         this.scope = scope;
-    }
-
-    public List<Class<?>> getDependencies() {
-        return dependencies;
-    }
-
-    public void setDependencies(List<Class<?>> dependencies) {
-        this.dependencies = dependencies;
     }
 
     public Method getMethod() {
@@ -76,5 +69,21 @@ public class BeanMetadata {
 
     public void setAnnotationDependencies(List<DependencyMetadata> annotationDependencies) {
         this.annotationDependencies = annotationDependencies;
+    }
+
+    public BaseDependencyInjectionContext getContext() {
+        return context;
+    }
+
+    public void setContext(BaseDependencyInjectionContext context) {
+        this.context = context;
+    }
+
+    public boolean isBeanCreated() {
+        return beanCreated;
+    }
+
+    public void setBeanCreated(boolean beanCreated) {
+        this.beanCreated = beanCreated;
     }
 }

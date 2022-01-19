@@ -3,10 +3,10 @@ package org.loktevik.di.context;
 import org.loktevik.di.exceptions.BeanClarificationException;
 import org.loktevik.di.exceptions.BeanNotFoundException;
 
-import java.lang.reflect.InvocationTargetException;
-import java.lang.reflect.Method;
-import java.lang.reflect.Parameter;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
 import java.util.stream.Collectors;
 
 class MainBeanContainer {
@@ -27,11 +27,9 @@ class MainBeanContainer {
             throw new BeanClarificationException(String.format("More than one bean for name \"%s\" found", beanName));
         } else if (bean != null){
             return bean;
-        } else if (beanMetadata != null) {
-            return getBeanFromMetadata(beanMetadata);
+        } else {
+            return beanMetadata;
         }
-
-        return null;
     }
 
     public static Object getBean(Class<?> clazz){
@@ -50,26 +48,29 @@ class MainBeanContainer {
         } else if (singletonBeans.size() == 1){
             return singletonBeans.get(0);
         } else if (prototypeBeans.size() == 1){
-            BeanMetadata metadata = prototypeBeans.get(0);
-            return getBeanFromMetadata(metadata);
+            return prototypeBeans.get(0);
         }
 
         return null;
     }
 
-    private static Object getBeanFromMetadata(BeanMetadata beanMetadata){
-        List<Object> dependencyBeans = new ArrayList<>();
-        for (Class<?> cl : beanMetadata.getDependencies()){
-            dependencyBeans.add(getBean(cl));
+    protected static BeanMetadata getBeanMetadata(DependencyMetadata dm){
+        List<BeanMetadata> result;
+        if (!"".equals(dm.getName())){
+            result = getMetadataList().stream().filter(metadata -> metadata.getName().equals(dm.getName())).collect(Collectors.toList());
+        } else{
+            result = getMetadataList().stream().filter(metadata -> metadata.getClazz().equals(dm.getClazz())).collect(Collectors.toList());
         }
 
-        try {
-            return beanMetadata.getMethod().invoke(beanMetadata.getInvokeOn(), dependencyBeans.toArray());
-        } catch (InvocationTargetException | IllegalAccessException e){
-            System.out.println(e.getMessage());
+        if (result.size() > 1){
+            throw new BeanClarificationException(String.format("More than one bean for class \"%s\" found", dm.getClazz()));
+        } else if (result.size() == 0 && !"".equals(dm.getName())){
+            throw new BeanNotFoundException(String.format("Bean with name \"%s\" not found", dm.getName()));
+        } else if (result.size() == 0){
+            throw new BeanNotFoundException(String.format("Bean with class \"%s\" not found", dm.getClazz()));
         }
 
-        return null;
+        return result.get(0);
     }
 
     public static void addSingletonBean(String beanName, Object bean){
