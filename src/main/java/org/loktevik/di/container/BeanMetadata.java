@@ -1,4 +1,4 @@
-package org.loktevik.di.context;
+package org.loktevik.di.container;
 
 import java.lang.reflect.Method;
 import java.util.ArrayList;
@@ -11,8 +11,8 @@ public class BeanMetadata {
     private Object invokeOn;
     private Method method;
     private List<DependencyMetadata> annotationDependencies = new ArrayList<>();
-    private ContextType contextType;
-    private BaseDependencyInjectionContext context;
+    private ContainerType containerType;
+    private BaseDependencyInjectionContainer container;
     private boolean beanCreated = false;
 
     public String getName() {
@@ -55,12 +55,12 @@ public class BeanMetadata {
         this.invokeOn = invokeOn;
     }
 
-    public ContextType getContextType() {
-        return contextType;
+    public ContainerType getContainerType() {
+        return containerType;
     }
 
-    public void setContextType(ContextType contextType) {
-        this.contextType = contextType;
+    public void setContainerType(ContainerType containerType) {
+        this.containerType = containerType;
     }
 
     public List<DependencyMetadata> getAnnotationDependencies() {
@@ -71,12 +71,12 @@ public class BeanMetadata {
         this.annotationDependencies = annotationDependencies;
     }
 
-    public BaseDependencyInjectionContext getContext() {
-        return context;
+    public BaseDependencyInjectionContainer getContainer() {
+        return container;
     }
 
-    public void setContext(BaseDependencyInjectionContext context) {
-        this.context = context;
+    public void setContainer(BaseDependencyInjectionContainer container) {
+        this.container = container;
     }
 
     public boolean isBeanCreated() {

@@ -1,11 +1,11 @@
-package org.loktevik.di.context;
+package org.loktevik.di.container;
 
-public interface DependencyInjectionContext {
+public interface DependencyInjectionContainer {
     Object getBean(String beanName);
 
     <T> T getBean(Class<T> clazz);
 
     <T> T getBean(String beanName, Class<T> clazz);
 
-    DependencyInjectionContext run();
+    DependencyInjectionContainer run();
 }

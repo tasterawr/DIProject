@@ -18,21 +18,20 @@ public class AppConfig {
 //        return new TestClassA();
 //    }
 //
-//    @Bean
-//    @Prototype
-//    public TestClassC testClassC(TestClassA testClassA, TestClassB testClassB, @ByName("partyNow") String s){
-//        TestClassC testClassC = new TestClassC(testClassA);
-//        testClassC.setTestClassB(testClassB);
-//        testClassC.setValue(s);
-//        return testClassC;
-//    }
+    @Bean
+    @Prototype
+    public TestClassB testClassB(TestClassA testClassA){
+        TestClassB testClassB = new TestClassB(testClassA);
+        return testClassB;
+    }
 
-    @Bean(className = "helloWorld")
+
+    @Bean(beanName = "helloWorld")
     public String value(){
         return "Hello World";
     }
 
-    @Bean(className = "partyNow")
+    @Bean(beanName = "partyNow")
     public String party(){
         return "PARTY NOW";
     }

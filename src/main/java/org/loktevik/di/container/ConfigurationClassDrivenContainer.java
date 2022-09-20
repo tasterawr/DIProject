@@ -1,11 +1,10 @@
-package org.loktevik.di.context;
+package org.loktevik.di.container;
 
 import org.loktevik.di.annotations.Bean;
 import org.loktevik.di.annotations.ByName;
 import org.loktevik.di.annotations.Prototype;
 import org.loktevik.di.exceptions.BeanNotFoundException;
-import org.loktevik.di.exceptions.ConfigurationClassDrivenContextException;
-import org.loktevik.di.exceptions.ContextException;
+import org.loktevik.di.exceptions.ConfigurationClassDrivenContainerException;
 
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
@@ -16,30 +15,30 @@ import java.util.Comparator;
 import java.util.List;
 import java.util.stream.Collectors;
 
-public class ConfigurationClassDrivenContext extends BaseDependencyInjectionContext implements DependencyInjectionContext{
+public class ConfigurationClassDrivenContainer extends BaseDependencyInjectionContainer implements DependencyInjectionContainer {
 
-    public ConfigurationClassDrivenContext(Class<?>... configurationClasses) {
+    public ConfigurationClassDrivenContainer(Class<?>... configurationClasses) {
         for (Class<?> config : configurationClasses){
 
             Object configInstance = null;
             try {
                 configInstance = config.getDeclaredConstructor().newInstance();
             } catch (InstantiationException | IllegalAccessException | NoSuchMethodException | InvocationTargetException e) {
-                throw new ConfigurationClassDrivenContextException(String.format("Couldn't create instance of configuration class %s.", config), e);
+                throw new ConfigurationClassDrivenContainerException(String.format("Couldn't create instance of configuration class %s.", config), e);
             }
 
             for (Method m : getConfigurationMethods(config)){
                 BeanMetadata beanMetadata = new BeanMetadata();
-                if (!m.getDeclaredAnnotation(Bean.class).className().equals("")){
-                    beanMetadata.setName(m.getDeclaredAnnotation(Bean.class).className());
+                if (!m.getDeclaredAnnotation(Bean.class).beanName().equals("")){
+                    beanMetadata.setName(m.getDeclaredAnnotation(Bean.class).beanName());
                 } else {
                     beanMetadata.setName(m.getName());
                 }
                 beanMetadata.setClazz(m.getReturnType());
                 beanMetadata.setMethod(m);
                 beanMetadata.setInvokeOn(configInstance);
-                beanMetadata.setContextType(ContextType.CONFIGURATION_DRIVEN);
-                beanMetadata.setContext(this);
+                beanMetadata.setContainerType(ContainerType.CONFIGURATION_DRIVEN);
+                beanMetadata.setContainer(this);
 
                 if (m.isAnnotationPresent(Prototype.class)){
                     beanMetadata.setScope("prototype");
@@ -56,7 +55,7 @@ public class ConfigurationClassDrivenContext extends BaseDependencyInjectionCont
                     beanMetadata.getAnnotationDependencies().add(dm);
                 }
 
-                MainBeanContainer.addBeanMetadata(beanMetadata);
+                MainBeanRepository.addBeanMetadata(beanMetadata);
             }
         }
     }
@@ -74,16 +73,16 @@ public class ConfigurationClassDrivenContext extends BaseDependencyInjectionCont
             if (beanMetadata.getScope().equals("singleton")){
                 if (beanMetadata.getAnnotationDependencies().size() == 0){
                     Object bean = beanMetadata.getMethod().invoke(beanMetadata.getInvokeOn());
-                    MainBeanContainer.addSingletonBean(beanMetadata.getName(), bean);
+                    MainBeanRepository.addSingletonBean(beanMetadata.getName(), bean);
                 } else {
                     List<Object> dependencyBeans = new ArrayList<>();
                     addDependenciesToList(beanMetadata, dependencyBeans);
 
                     Object bean = beanMetadata.getMethod().invoke(beanMetadata.getInvokeOn(), dependencyBeans.toArray());
-                    MainBeanContainer.addSingletonBean(beanMetadata.getName(), bean);
+                    MainBeanRepository.addSingletonBean(beanMetadata.getName(), bean);
                 }
             } else if (beanMetadata.getScope().equals("prototype")){
-                MainBeanContainer.addPrototypeBean(beanMetadata.getName(), beanMetadata);
+                MainBeanRepository.addPrototypeBean(beanMetadata.getName(), beanMetadata);
             }
         } catch (InvocationTargetException | IllegalAccessException e) {
             e.printStackTrace();
@@ -119,7 +118,7 @@ public class ConfigurationClassDrivenContext extends BaseDependencyInjectionCont
 
     @Override
     public Object getBean(String beanName) {
-        Object bean = MainBeanContainer.getBean(beanName);
+        Object bean = MainBeanRepository.getBean(beanName);
         if (bean == null){
             throw new BeanNotFoundException(String.format("Bean with name \"%s\" not found", beanName));
         } else if (!(bean instanceof BeanMetadata)) {
@@ -130,7 +129,7 @@ public class ConfigurationClassDrivenContext extends BaseDependencyInjectionCont
     }
 
     public <T> T getBean(Class<T> clazz) {
-        Object bean = MainBeanContainer.getBean(clazz);
+        Object bean = MainBeanRepository.getBean(clazz);
         if (bean == null){
             throw new BeanNotFoundException(String.format("Bean with class \"%s\" not found", clazz));
         } else if (!(bean instanceof BeanMetadata)) {

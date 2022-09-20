@@ -1,10 +1,9 @@
-package org.loktevik.di.context;
+package org.loktevik.di.container;
 
 import org.loktevik.di.annotations.*;
-import org.loktevik.di.context.handlers.BeanMetadataHandler;
-import org.loktevik.di.exceptions.BeanCreationException;
-import org.loktevik.di.exceptions.BeanNotFoundException;
-import org.loktevik.di.exceptions.ComponentScanException;
+import org.loktevik.di.container.handlers.BeanMetadataDefaultHandlerClassesContainer;
+import org.loktevik.di.container.handlers.BeanMetadataHandler;
+import org.loktevik.di.exceptions.*;
 
 import java.io.File;
 import java.lang.reflect.Constructor;
@@ -13,14 +12,15 @@ import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 import java.util.stream.Collectors;
 
-public class AnnotationDrivenContext extends BaseDependencyInjectionContext implements DependencyInjectionContext {
+public class AnnotationDrivenContainer extends BaseDependencyInjectionContainer implements DependencyInjectionContainer {
     private final List<Class<?>> classes;
     private final String basePackageName;
     private final List<BeanMetadataHandler> handlers;
-    private ConfigurationClassDrivenContext configurationClassDrivenContext = null;
+    private ConfigurationClassDrivenContainer configurationClassDrivenContainer = null;
 
     {
         classes = new ArrayList<>();
@@ -28,27 +28,48 @@ public class AnnotationDrivenContext extends BaseDependencyInjectionContext impl
         handlers = new ArrayList<>();
     }
 
-    public AnnotationDrivenContext(Path componentScanPath){
+    public AnnotationDrivenContainer(Path componentScanPath){
         scanComponents(componentScanPath);
-        getBeanMetadataHandlers();
+        initDefaultMetadataHandlers();
+        initCustomMetadataHandlers();
         List<Class<?>> componentClasses = getComponentClasses();
 
         for (Class<?> cl : componentClasses){
             BeanMetadata beanMetadata = new BeanMetadata();
             beanMetadata.setClazz(cl);
-            beanMetadata.setContextType(ContextType.ANNOTATION_DRIVEN);
-            beanMetadata.setContext(this);
+            beanMetadata.setContainerType(ContainerType.ANNOTATION_DRIVEN);
+            beanMetadata.setContainer(this);
             beanMetadata.setAnnotationDependencies(new ArrayList<>());
 
             for (BeanMetadataHandler handler : handlers){
                 handler.handle(beanMetadata);
             }
-            MainBeanContainer.addBeanMetadata(beanMetadata);
+            MainBeanRepository.addBeanMetadata(beanMetadata);
         }
 
         List<Class<?>> includedConfigurations = getIncludedConfigurations();
         if (includedConfigurations.size() != 0){
-            configurationClassDrivenContext = new ConfigurationClassDrivenContext(includedConfigurations.toArray(new Class<?>[0]));
+            configurationClassDrivenContainer = new ConfigurationClassDrivenContainer(includedConfigurations.toArray(new Class<?>[0]));
+        }
+    }
+
+    private void initDefaultMetadataHandlers() {
+        Class<?>[] defaultHandlerClasses = BeanMetadataDefaultHandlerClassesContainer.class.getDeclaredClasses();
+        Object containerClassInstance;
+        try {
+            containerClassInstance = BeanMetadataDefaultHandlerClassesContainer.class.getDeclaredConstructor().newInstance();
+        } catch (InstantiationException | IllegalAccessException | InvocationTargetException | NoSuchMethodException e) {
+            throw new AnnotationDrivenContainerException(String.format("Could not create instance of default bean metadata classes container %s.", BeanMetadataDefaultHandlerClassesContainer.class));
+        }
+
+        for (Class<?> cl : defaultHandlerClasses){
+            try {
+                Constructor<?> constructor = cl.getDeclaredConstructor(BeanMetadataDefaultHandlerClassesContainer.class);
+                constructor.setAccessible(true);
+                handlers.add((BeanMetadataHandler) constructor.newInstance(containerClassInstance));
+            } catch (InstantiationException | IllegalAccessException | InvocationTargetException | NoSuchMethodException e) {
+                throw new BeanMetadataHandlerException(String.format("Could not create instance of default bean metadata handler from class %s.", cl), e);
+            }
         }
     }
 
@@ -64,7 +85,7 @@ public class AnnotationDrivenContext extends BaseDependencyInjectionContext impl
                 .collect(Collectors.toList());
     }
 
-    private void getBeanMetadataHandlers() {
+    private void initCustomMetadataHandlers() {
         classes.stream()
                 .filter(clazz -> clazz.isAnnotationPresent(MetadataHandler.class))
                 .forEach(clazz -> {
@@ -87,9 +108,9 @@ public class AnnotationDrivenContext extends BaseDependencyInjectionContext impl
                 } else {
                     bean = createBeanWithDependencies(beanMetadata);
                 }
-                MainBeanContainer.addSingletonBean(beanMetadata.getName(), bean);
+                MainBeanRepository.addSingletonBean(beanMetadata.getName(), bean);
             } else if (beanMetadata.getScope().equals("prototype")){
-                MainBeanContainer.addPrototypeBean(beanMetadata.getName(), beanMetadata);
+                MainBeanRepository.addPrototypeBean(beanMetadata.getName(), beanMetadata);
             }
         } catch (InvocationTargetException | IllegalAccessException | NoSuchMethodException | InstantiationException e) {
             throw new BeanCreationException(String.format("Could not create bean for class %s", beanMetadata.getClazz()), e);
@@ -143,15 +164,13 @@ public class AnnotationDrivenContext extends BaseDependencyInjectionContext impl
     }
 
     private void injectFieldDependencies(BeanMetadata beanMetadata, List<Object> fieldDependencyBeans, Object bean) throws IllegalAccessException {
+        List<Field> requiredFields = Arrays.stream(beanMetadata.getClazz().getDeclaredFields()).filter(field -> field.isAnnotationPresent(AutoInject.class)).collect(Collectors.toList());
         if (fieldDependencyBeans.size() != 0){
-            for (Field field : beanMetadata.getClazz().getDeclaredFields()){
-                if (field.isAnnotationPresent(AutoInject.class)){
-                    field.setAccessible(true);
-                    Object dependency = fieldDependencyBeans.stream()
-                            .filter(depBean -> depBean.getClass().equals(field.getType()))
-                            .findFirst().orElse(null);
-                    field.set(bean, dependency);
-                }
+            for (int i = 0; i < fieldDependencyBeans.size(); i++){
+                Field field = requiredFields.get(i);
+                field.setAccessible(true);
+                Object dependency = fieldDependencyBeans.get(i);
+                field.set(bean, dependency);
             }
         }
     }
@@ -217,14 +236,14 @@ public class AnnotationDrivenContext extends BaseDependencyInjectionContext impl
 
     @Override
     public Object getBean(String beanName) {
-        Object bean = MainBeanContainer.getBean(beanName);
+        Object bean = MainBeanRepository.getBean(beanName);
         if (bean == null){
             throw new BeanNotFoundException(String.format("Bean with name \"%s\" not found", beanName));
         } else if (!(bean instanceof BeanMetadata)) {
             return bean;
         } else{
-            if (((BeanMetadata) bean).getContextType().equals(ContextType.CONFIGURATION_DRIVEN)){
-                return configurationClassDrivenContext.getBean(beanName);
+            if (((BeanMetadata) bean).getContainerType().equals(ContainerType.CONFIGURATION_DRIVEN)){
+                return configurationClassDrivenContainer.getBean(beanName);
             }
 
             return getPrototypeBean((BeanMetadata)bean);
@@ -233,14 +252,14 @@ public class AnnotationDrivenContext extends BaseDependencyInjectionContext impl
 
     @Override
     public <T> T getBean(Class<T> clazz) {
-        Object bean = MainBeanContainer.getBean(clazz);
+        Object bean = MainBeanRepository.getBean(clazz);
         if (bean == null){
             throw new BeanNotFoundException(String.format("Bean with class \"%s\" not found", clazz));
         } else if (!(bean instanceof BeanMetadata)) {
             return (T)bean;
         } else{
-            if (((BeanMetadata) bean).getContextType().equals(ContextType.CONFIGURATION_DRIVEN)){
-                return configurationClassDrivenContext.getBean(clazz);
+            if (((BeanMetadata) bean).getContainerType().equals(ContainerType.CONFIGURATION_DRIVEN)){
+                return configurationClassDrivenContainer.getBean(clazz);
             } else{
                 return (T)getPrototypeBean((BeanMetadata)bean);
             }

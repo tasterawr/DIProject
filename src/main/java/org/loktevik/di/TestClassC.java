@@ -4,16 +4,17 @@ import org.loktevik.di.annotations.*;
 
 @Component
 public class TestClassC {
-    private TestClassA testClassA;
+    private ITestClass testClassA;
 
-    private TestClassB testClassB;
+    private ITestClass testClassB;
 
     @AutoInject("helloWorld")
     private String value;
 
     @AutoInject
-    public TestClassC(TestClassA testClassA){
+    public TestClassC(@ByName("classA") ITestClass testClassA, ITestClass testClassB){
         this.testClassA = testClassA;
+        this.testClassB = testClassB;
     }
 
     public void action(){
@@ -22,7 +23,6 @@ public class TestClassC {
         System.out.println("In class C. Value: " + value);
     }
 
-    @AutoInject
     public void setTestClassB(TestClassB testClassB) {
         this.testClassB = testClassB;
     }

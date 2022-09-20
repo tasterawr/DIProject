@@ -1,6 +1,6 @@
 package org.loktevik.di.exceptions;
 
-public class BeanClarificationException extends BeanContainerException {
+public class BeanClarificationException extends BeanRepositoryException {
 
     public BeanClarificationException(String message){
         super(message);

@@ -1,6 +1,6 @@
 package org.loktevik.di.exceptions;
 
-public class BeanMetadataHandlerException extends AnnotationDrivenContextException{
+public class BeanMetadataHandlerException extends AnnotationDrivenContainerException {
 
     public BeanMetadataHandlerException(String message){
         super(message);

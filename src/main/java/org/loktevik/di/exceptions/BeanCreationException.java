@@ -1,6 +1,6 @@
 package org.loktevik.di.exceptions;
 
-public class BeanCreationException extends ContextException{
+public class BeanCreationException extends ContainerException {
 
     public BeanCreationException(String s){
         super(s);

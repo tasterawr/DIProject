@@ -1,4 +1,4 @@
-package org.loktevik.di.context;
+package org.loktevik.di.container;
 
 public class DependencyMetadata {
     private String name;

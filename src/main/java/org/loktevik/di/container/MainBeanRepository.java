@@ -1,4 +1,4 @@
-package org.loktevik.di.context;
+package org.loktevik.di.container;
 
 import org.loktevik.di.exceptions.BeanClarificationException;
 import org.loktevik.di.exceptions.BeanNotFoundException;
@@ -9,7 +9,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
 
-class MainBeanContainer {
+class MainBeanRepository {
     private static final List<BeanMetadata> metadataList;
     private static final Map<String, Object> singletonBeanMap;
     private static final Map<String, BeanMetadata> prototypeBeanMap;
@@ -34,11 +34,11 @@ class MainBeanContainer {
 
     public static Object getBean(Class<?> clazz){
         List<Object> singletonBeans = singletonBeanMap.values().stream()
-                .filter(bean -> bean.getClass().equals(clazz))
+                .filter(bean -> clazz.isAssignableFrom(bean.getClass()))
                 .collect(Collectors.toList());
 
         List<BeanMetadata> prototypeBeans = prototypeBeanMap.values().stream()
-                .filter(metadata -> metadata.getClazz().equals(clazz))
+                .filter(metadata -> clazz.isAssignableFrom(metadata.getClazz()))
                 .collect(Collectors.toList());
 
         if ((singletonBeans.size() != 0 && prototypeBeans.size() != 0)
@@ -56,10 +56,10 @@ class MainBeanContainer {
 
     protected static BeanMetadata getBeanMetadata(DependencyMetadata dm){
         List<BeanMetadata> result;
-        if (!"".equals(dm.getName())){
+        if (!"".equals(dm.getName()) && dm.getName() != null){
             result = getMetadataList().stream().filter(metadata -> metadata.getName().equals(dm.getName())).collect(Collectors.toList());
         } else{
-            result = getMetadataList().stream().filter(metadata -> metadata.getClazz().equals(dm.getClazz())).collect(Collectors.toList());
+            result = getMetadataList().stream().filter(metadata -> dm.getClazz().isAssignableFrom(metadata.getClazz())).collect(Collectors.toList());
         }
 
         if (result.size() > 1){
